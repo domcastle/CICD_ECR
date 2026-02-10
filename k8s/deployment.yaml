@@ -21,7 +21,7 @@ spec:
       
         # 2. [핵심 수정] 이미지 주소 중간에 'team1-images'가 꼭 들어가야 합니다!
         # (GitHub Actions가 이 단어를 찾아서 진짜 주소로 바꿔줍니다)
-        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-worker:a2dd60e4ce8374bac656bcd13daf364725339b53
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-worker:0b888ccc1691654323f1a415e402c2589fdb1161
         
         imagePullPolicy: Always
         env:
