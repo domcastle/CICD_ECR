@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-external-service # 코드에서 OLLAMA_HOST로 사용할 이름
+  namespace: my-project
+spec:
+  type: ExternalName
+  # [수정] 이미지에서 확인된 EC2의 프라이빗 IP를 여기에 적으세요
+  externalName: 10.0.2.47 
+  ports:
+  - port: 11434

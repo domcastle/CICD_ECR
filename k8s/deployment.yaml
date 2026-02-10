@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-worker
+  namespace: my-project  # 나중에 실제 ROSA 프로젝트 이름으로 변경하세요
+  labels:
+    app: ai-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-worker
+  template:
+    metadata:
+      labels:
+        app: ai-worker
+    spec:
+      containers:
+      # 1. 컨테이너 이름은 'ai-worker'로 되돌려놓습니다 (라벨과 일치)
+      - name: ai-worker
+      
+        # 2. [핵심 수정] 이미지 주소 중간에 'team1-images'가 꼭 들어가야 합니다!
+        # (GitHub Actions가 이 단어를 찾아서 진짜 주소로 바꿔줍니다)
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-images:a2dd60e4ce8374bac656bcd13daf364725339b53
+        
+        imagePullPolicy: Always
+        env:
+        # AWS 인증 정보 (Secret 연결)
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-secret
+              key: AWS_SECRET_ACCESS_KEY
+        
+        # 일반 설정 (ConfigMap 연결)
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: ai-worker-config
+              key: AWS_REGION
+        - name: AWS_S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: ai-worker-config
+              key: AWS_S3_BUCKET
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: ai-worker-config
+              key: REDIS_HOST
+        - name: OLLAMA_HOST
+          value: "http://ollama-external-service:11434"
