@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+permissions:
+  contents: write   # 🔥 이 줄 추가
+
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: team1-worker   # 🔥 실제 ECR 이름과 동일하게
