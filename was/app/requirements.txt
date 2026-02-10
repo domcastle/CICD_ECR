@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pyjwt
+python-multipart
+redis>=5.0.0
+sqlalchemy
+psycopg2-binary
+httpx
+asyncpg
+minio
+
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+
