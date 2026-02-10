@@ -1,4 +1,3 @@
----
 name: Deploy AI Worker
 
 on:
@@ -7,18 +6,19 @@ on:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: team1-images      # AWS ECR에 만든 리포지토리 이름 (다르면 수정!)
-  IMAGE_TAG: ${{ github.sha }}   # 커밋 해시를 태그로 사용
+  ECR_REPOSITORY: team1-worker   # 🔥 실제 ECR 이름과 동일하게
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
+      uses: aws-actions/configure-aws-credentials@v4   # 🔥 v4로 변경
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -26,25 +26,24 @@ jobs:
 
     - name: Login to Amazon ECR
       id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build, tag, and push image to Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
       run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./ai-worker-project
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
     - name: Update Kubernetes Manifest
       run: |
         git config --global user.email "github-actions@github.com"
         git config --global user.name "GitHub Actions"
-        
+
         ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
-        
-        # deployment.yaml 파일 내의 이미지 주소를 새 버전으로 교체
-        sed -i "s|image: .*$ECR_REPOSITORY:.*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|" k8s/deployment.yaml
-        
+
+        sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|" k8s/deployment.yaml
+
         git add k8s/deployment.yaml
-        git commit -m "Update image tag to $IMAGE_TAG"
+        git commit -m "Update image tag to $IMAGE_TAG" || echo "No changes to commit"
         git push
