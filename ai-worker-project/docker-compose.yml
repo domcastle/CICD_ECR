@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # 1. AI Worker
+  ai-worker:
+    build: .
+    image: ai-worker:latest
+    restart: always
+    # [핵심] 리눅스 도커에서 호스트(Host) 접근을 위한 설정
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_QUEUE=${REDIS_QUEUE}
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - CAPTION_VARIANT=${CAPTION_VARIANT}
+    depends_on:
+      - redis
+
+  # 2. Redis (유지)
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+volumes:
+  minio_data:
