@@ -15,13 +15,20 @@ spec:
       labels:
         app: ai-worker
     spec:
+      imagePullSecrets:
+      - name: ecr-secret
+
       containers:
       # 1. 컨테이너 이름은 'ai-worker'로 되돌려놓습니다 (라벨과 일치)
       - name: ai-worker
       
         # 2. [핵심 수정] 이미지 주소 중간에 'team1-images'가 꼭 들어가야 합니다!
         # (GitHub Actions가 이 단어를 찾아서 진짜 주소로 바꿔줍니다)
+<<<<<<< HEAD
         image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-worker:0b888ccc1691654323f1a415e402c2589fdb1161
+=======
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-worker:initial-tag
+>>>>>>> 2da8419 (5nd man boy)
         
         imagePullPolicy: Always
         env:
