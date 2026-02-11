@@ -16,7 +16,7 @@ spec:
         app: ai-worker
     spec:
       imagePullSecrets:
-      - name: ecr-secret
+      - name: regcred  # CronJob이 만들어주는 Secret 이름
 
       containers:
       # 1. 컨테이너 이름은 'ai-worker'로 되돌려놓습니다 (라벨과 일치)
