@@ -51,6 +51,8 @@ spec:
             configMapKeyRef:
               name: ai-worker-config
               key: AWS_S3_BUCKET
+        - name: REDIS_PORT
+          value: "6379"
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
