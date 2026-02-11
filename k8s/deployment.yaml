@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ai-worker
-  namespace: my-project  # 나중에 실제 ROSA 프로젝트 이름으로 변경하세요
+  namespace: justic  # 나중에 실제 ROSA 프로젝트 이름으로 변경하세요
   labels:
     app: ai-worker
 spec:
