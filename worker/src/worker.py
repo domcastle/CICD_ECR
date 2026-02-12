@@ -51,10 +51,10 @@ def get_ollama_server_ip():
         )
         for reservation in response['Reservations']:
             for instance in reservation['Instances']:
-                public_ip = instance.get('PublicIpAddress')
-                if public_ip:
-                    print(f"✅ Found Server: {public_ip}")
-                    return f"http://{public_ip}:11434"
+                private_ip = instance.get('PrivateIpAddress')
+                if private_ip:
+                    print(f"✅ Found Server: {private_ip}")
+                    return f"http://{private_ip}:11434"
         return None
     except Exception as e:
         print(f"❌ AWS API Error: {e}")
