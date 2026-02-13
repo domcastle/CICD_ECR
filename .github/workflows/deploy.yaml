@@ -49,4 +49,5 @@ jobs:
 
         git add k8s/deployment.yaml
         git commit -m "Update image tag to $IMAGE_TAG" || echo "No changes to commit"
+        git pull origin main --rebase
         git push
