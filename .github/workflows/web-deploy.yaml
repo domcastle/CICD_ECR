@@ -59,4 +59,4 @@ jobs:
 
         git add k8s/web-deployment.yaml
         git commit -m "Update WEB image tag to $IMAGE_TAG" || echo "No changes to commit"
-        git push
+        git push# trigger build
