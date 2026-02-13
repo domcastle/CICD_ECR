@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: justic-was
+  namespace: justic
+  labels:
+    app: justic-was
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: justic-was
+  template:
+    metadata:
+      labels:
+        app: justic-was
+    spec:
+      imagePullSecrets:
+      - name: regcred
+      containers:
+      - name: justic-was
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-was:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        
+        # 1. was-secret (DB 정보 등 24개 변수) 로드
+        # (주의: 여기 있는 MINIO_... 값들은 파이썬 코드에서 안 쓰니 무시됨)
+        envFrom:
+        - secretRef:
+            name: was-secret
+
+        # 2. AWS S3 연결을 위한 핵심 변수 추가 (🔥 중요)
+        env:
+        # (1) 인증 정보 (aws-secret에서 가져옴)
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-secret
+              key: AWS_SECRET_ACCESS_KEY
+              
+        # (2) 버킷 설정 (직접 입력하거나 ConfigMap 사용)
+        - name: AWS_REGION
+          value: "ap-northeast-2"  # 서울 리전 고정
+        - name: AWS_S3_BUCKET
+          value: "hybrid-video-minio-backup-prod"    # 🔥 실제 AWS S3 버킷 이름으로 꼭 변경하세요!

@@ -1,0 +1,58 @@
+name: Deploy Backend WAS
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:             # 🔥 중요: was 폴더가 변경될 때만 이 액션이 실행됨
+      - 'was/**'
+      - '.github/workflows/was-deploy.yaml'
+
+permissions:
+  contents: write
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: team1-was    # 🔥 아까 만든 WAS용 ECR 이름
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        # 🔥 빌드 경로를 ./worker가 아니라 ./was로 변경
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./was
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+    - name: Update Kubernetes Manifest
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub Actions"
+
+        ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
+
+        # 🔥 중요: was-deployment.yaml 파일만 수정하도록 타겟 변경
+        sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|" k8s/was-deployment.yaml
+
+        git add k8s/was-deployment.yaml
+        git commit -m "Update WAS image tag to $IMAGE_TAG" || echo "No changes to commit"
+        git pull origin main --rebase
+        git push
