@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from sqlalchemy import text
-from db import engine, redis_client
+from app.db import engine, redis_client
 
 router = APIRouter()
 

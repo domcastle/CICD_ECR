@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from auth import router as auth_router
-from video import router as video_router
-from video2 import router as video2_router
-from health import router as health_router
+from app.auth import router as auth_router
+from app.video import router as video_router
+from app.video2 import router as video2_router
+from app.health import router as health_router
 
 # MinIO 관련 import 삭제
 
@@ -20,15 +20,7 @@ app = FastAPI(
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://justic.store:8000",
-        "http://justic.store",
-        "https://justic.store",
-        "http://auth.justic.store:8000",
-        "http://auth.justic.store",
-        "https://auth.justic.store:8000",
-        "https://auth.justic.store",
-    ],
+    allow_origins=["https://justic.store"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

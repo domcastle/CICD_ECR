@@ -1,11 +1,10 @@
 # app/ai.py
 from typing import Optional, List
-
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 # ✅ 정확한 import (이게 핵심)
-from db_ai import AsyncAISessionLocal
+from app.db_ai import AsyncAISessionLocal
 
 
 # ======================================================

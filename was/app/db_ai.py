@@ -1,7 +1,7 @@
 # app/db_ai.py
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from config import AI_DB_URL
+from app.config import AI_DB_URL
 
 ai_engine = create_async_engine(
     AI_DB_URL,

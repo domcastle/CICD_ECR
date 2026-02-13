@@ -6,11 +6,11 @@ import secrets
 from datetime import datetime, timedelta
 from sqlalchemy import text
 
-from config import *
-from db import AsyncSessionLocal, redis_client
-from utils import state_key, login_session_key, safe_redirect
-from google_auth import exchange_token, fetch_userinfo
-from security import create_jwt
+from app.config import *
+from app.db import AsyncSessionLocal, redis_client
+from app.utils import state_key, login_session_key, safe_redirect
+from app.google_auth import exchange_token, fetch_userinfo
+from app.security import create_jwt
 
 router = APIRouter(tags=["auth"])
 

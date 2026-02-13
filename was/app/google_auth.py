@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-from config import DB_URL
+from app.config import DB_URL
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
