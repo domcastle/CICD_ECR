@@ -20,7 +20,7 @@ spec:
       containers:
       - name: justic-web
         # GitHub Actions가 덮어씌울 이미지 주소
-        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-web:f80dbe6d32637506ab543f325aec4741b8a5ee92
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-web:7bcad6f6ba9799647f0caca8be7c1dcac13c8681
         imagePullPolicy: Always
         ports:
         - containerPort: 8080 # Route가 8080을 바라보고 있으므로 중요!
