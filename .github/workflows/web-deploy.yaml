@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      # 🔥 web 폴더 수정 시에만 이 워크플로우가 실행됨
+      # 🔥 web 폴더 수정 시에만 이 워크플로우가 실행됨 b
       - 'web/**'
       - '.github/workflows/web-deploy.yaml'
 
