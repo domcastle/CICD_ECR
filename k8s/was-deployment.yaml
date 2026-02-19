@@ -19,7 +19,7 @@ spec:
       - name: regcred
       containers:
       - name: justic-was
-        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-was:076536fed2d187afe08820b77afaf032b1e996b9
+        image: 536548358674.dkr.ecr.ap-northeast-2.amazonaws.com/team1-was:c9299625d8434cf60af3bca334e3bd6620f39f31
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
