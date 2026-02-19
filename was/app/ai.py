@@ -21,7 +21,7 @@ async def insert_final_video(
         try:
             await session.execute(
                 text("""
-                    INSERT INTO ai_final_videos
+                    INSERT INTO final_videos
                     (video_key, user_id, title, description)
                     VALUES (:video_key, :user_id, :title, :description)
                     ON CONFLICT (video_key)
@@ -56,7 +56,7 @@ async def mark_youtube_uploaded(
         try:
             await session.execute(
                 text("""
-                    UPDATE ai_final_videos
+                    UPDATE final_videos
                     SET
                         youtube_uploaded = TRUE,
                         youtube_video_id = :youtube_video_id,
@@ -90,7 +90,7 @@ async def get_user_library(user_id: str) -> List[dict]:
                     youtube_video_id,
                     selected_at,
                     youtube_uploaded_at
-                FROM ai_final_videos
+                FROM final_videos
                 WHERE user_id = :user_id
                 ORDER BY selected_at DESC
             """),
@@ -116,7 +116,7 @@ async def insert_operation_log(
         try:
             await session.execute(
                 text("""
-                    INSERT INTO ai_operation_logs
+                    INSERT INTO operation_logs
                     (user_id, log_type, status, video_key, message)
                     VALUES (:user_id, :log_type, :status, :video_key, :message)
                 """),
