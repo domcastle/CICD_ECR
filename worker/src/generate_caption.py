@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 MODEL = "qwen2.5vl"
-# 환경변수에서 호스트 주소를 받아옴 (Hybrid 모드 핵심)
+# 환경변수에서 호스트 주소를 받아옴 (Hybrid 모드 핵심) 1
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_URL = f"{OLLAMA_HOST}/api/chat"
 
