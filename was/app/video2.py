@@ -25,13 +25,11 @@ from app.ai import (
 from app.google_auth import get_youtube_service
 from googleapiclient.http import MediaFileUpload
 
-# ✅ 라우터 태그 video2 유지
 router = APIRouter(tags=["video2"])
 
 # ==============================
 # 환경 설정
 # ==============================
-# ✅ Grok 전용 엔드포인트 및 모델 설정
 KIE_API_URL = "https://api.kie.ai/api/v1/jobs/createTask"
 KIE_API_KEY = os.getenv("KIE_API_KEY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://auth.justic.store")
@@ -49,10 +47,10 @@ class YoutubeUploadRequest(BaseModel):
     video_key: str
     title: str
     description: Optional[str] = None
-    variant: str = "v1" # ✅ 추가: 유튜브에 올릴 영상 버전 (기본값 v1)
+    variant: str = "v1"
 
 # ==============================
-# 1. 비디오 생성 요청 (Grok API 호출)
+# 1. 비디오 생성 요청 (Grok API 규격 적용)
 # ==============================
 @router.post("/generate")
 async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(verify_jwt)):
@@ -60,10 +58,17 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
     if not KIE_API_KEY:
         raise HTTPException(500, "KIE_API_KEY missing")
 
+    # ✅ Grok Imagine 공식 Payload 구조
     payload = {
-        "prompt": req.prompt,
-        "model": "grok-imagine", # ✅ Grok 모델 사용
-        "callBackUrl": f"{APP_BASE_URL}/api/video2/callback", # ✅ video2 콜백 경로
+        "model": "grok-imagine/text-to-video",
+        "callBackUrl": f"{APP_BASE_URL}/api/video2/callback",
+        "input": {
+            "prompt": req.prompt,
+            "aspect_ratio": "9:16",
+            "mode": "normal",
+            "duration": "6",
+            "resolution": "480p"
+        }
     }
 
     try:
@@ -76,21 +81,13 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:
-        print(f"KIE V2 API Error: {e}")
-        raise HTTPException(502, f"KIE V2 Generation failed: {e}")
+        print(f"Grok API Request Error: {e}")
+        raise HTTPException(502, f"Grok API call failed: {e}")
 
-    # ✅ AttributeError: 'NoneType' object has no attribute 'get' 방지 로직
-    if not data or not isinstance(data, dict):
-        raise HTTPException(502, f"Invalid API response: {data}")
-
-    data_block = data.get("data")
-    if isinstance(data_block, dict):
-        task_id = data_block.get("taskId")
-    else:
-        task_id = data.get("id")
-
+    # ✅ 문서 규격에 따른 taskId 추출 (data.taskId)
+    task_id = data.get("data", {}).get("taskId")
     if not task_id:
-        raise HTTPException(502, f"KIE V2 did not return taskId. Raw response: {data}")
+        raise HTTPException(502, f"Grok did not return taskId: {data}")
 
     redis_client.set(f"task_user:{task_id}", user_id, ex=86400)
     redis_client.set(f"task_prompt:{task_id}", req.prompt, ex=86400)
@@ -99,14 +96,14 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
     return {"task_id": task_id, "status": "QUEUED"}
 
 # ==============================
-# 1.5. 프론트 polling용 상태 조회
+# 1.5. 상태 조회 (Polling)
 # ==============================
 @router.get("/status/{task_id}")
 def get_status_v2(task_id: str, token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
     owner = redis_client.get(f"task_user:{task_id}")
     if not owner or owner != user_id:
-        raise HTTPException(403, "Forbidden or Not Found")
+        raise HTTPException(403, "Forbidden")
 
     status = redis_client.get(f"task_status:{task_id}") or "UNKNOWN"
     return {"task_id": task_id, "status": status}
@@ -119,17 +116,17 @@ async def video2_callback(request: Request):
     payload = await request.json()
     data = payload.get("data", {})
     task_id = data.get("taskId")
-    video_url = data.get("info", {}).get("resultUrls", [None])[0]
+    
+    # Grok 결과 URL 추출 (info.resultUrls 또는 videoUrl 대응)
+    video_url = data.get("info", {}).get("resultUrls", [None])[0] or data.get("videoUrl")
 
     if not task_id or not video_url:
         return {"code": 200, "msg": "waiting"}
 
-    redis_client.set(f"task_status:{task_id}", "PROCESSING", ex=86400)
     user_id = redis_client.get(f"task_user:{task_id}")
     prompt = redis_client.get(f"task_prompt:{task_id}") or "Grok Video"
 
     if not user_id:
-        redis_client.set(f"task_status:{task_id}", "FAILED", ex=86400)
         return {"code": 200, "msg": "User mapping not found"}
 
     tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
@@ -138,48 +135,35 @@ async def video2_callback(request: Request):
     try:
         async with httpx.AsyncClient(timeout=300) as client:
             v_resp = await client.get(video_url)
-            v_resp.raise_for_status()
             with open(tmp_video, "wb") as f:
                 f.write(v_resp.content)
 
+        # 썸네일 생성
         subprocess.run(
             ["ffmpeg", "-y", "-i", tmp_video, "-ss", "00:00:01", "-vframes", "1", tmp_thumb],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # ✅ 원본 업로드 (variant=None 사용)
+        # S3 업로드 (원본)
         upload_video(user_id, task_id, tmp_video)
         upload_thumbnail(user_id, task_id, tmp_thumb)
 
-        await insert_final_video(
-            video_key=task_id, user_id=user_id, title=prompt[:50], description=prompt
-        )
+        # DB 기록
+        await insert_final_video(video_key=task_id, user_id=user_id, title=prompt[:50])
 
-        # ✅ Worker에게 작업 전달 (v1, v2 생성을 위해)
+        # ✅ AI 워커에게 v1, v2 다중 생성 작업 전달
         job_payload = {
             "input_key": f"{user_id}/{task_id}.mp4",
             "output_key": f"{user_id}/{task_id}_processed.mp4",
         }
         redis_client.lpush(REDIS_QUEUE, json.dumps(job_payload))
-
-        await insert_operation_log(
-            user_id=user_id,
-            log_type="VIDEO_GENERATE_V2", # ✅ V2 전용 로그 타입
-            status="SUCCESS",
-            video_key=task_id,
-            message="Callback processed successfully"
-        )
+        
         redis_client.set(f"task_status:{task_id}", "COMPLETED", ex=86400)
+        await insert_operation_log(user_id, "VIDEO_GENERATE_V2", "SUCCESS", task_id)
 
     except Exception as e:
-        print(f"V2 Callback error: {e}")
+        print(f"Grok Callback Error: {e}")
         redis_client.set(f"task_status:{task_id}", "FAILED", ex=86400)
-        try:
-            await insert_operation_log(
-                user_id=user_id, log_type="VIDEO_GENERATE_V2", status="FAILED",
-                video_key=task_id, message=str(e)
-            )
-        except Exception: pass
     finally:
         for f in (tmp_video, tmp_thumb):
             if os.path.exists(f): os.remove(f)
@@ -187,14 +171,11 @@ async def video2_callback(request: Request):
     return {"code": 200, "msg": "success"}
 
 # ==============================
-# 3. 내 비디오 목록
+# 3. 내 비디오 목록 (개별 노출 방식)
 # ==============================
 @router.get("/list")
 def get_my_videos_v2(token_payload: dict = Depends(verify_jwt)):
-    user_id = token_payload["sub"]
-    # ✅ s3_client의 list_user_videos 호출 (중복 제거 없는 개별 노출 방식)
-    videos = list_user_videos(user_id)
-    return {"videos": videos}
+    return {"videos": list_user_videos(token_payload["sub"])}
 
 # ==============================
 # 4. 스트리밍 및 썸네일
@@ -203,7 +184,6 @@ def get_my_videos_v2(token_payload: dict = Depends(verify_jwt)):
 def stream_video_v2(task_id: str, variant: Optional[str] = Query(None), token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
     try:
-        # ✅ variant 파라미터 전달 (v1, v2 등)
         file_stream = get_video_stream(user_id, task_id, variant=variant)
         return StreamingResponse(file_stream, media_type="video/mp4")
     except Exception:
@@ -227,11 +207,10 @@ async def upload_to_youtube_api_v2(body: YoutubeUploadRequest, token_payload: di
     task_id = body.video_key
     tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
     try:
-        # ✅ 사용자가 요청한 variant를 우선적으로 가져오기 시도
+        # 요청 버전(v1, v2) 우선 시도, 실패 시 원본 시도
         try:
             stream = get_video_stream(user_id, task_id, variant=body.variant)
         except Exception:
-            # 실패 시 원본 시도
             stream = get_video_stream(user_id, task_id, variant=None)
 
         with open(tmp_video, "wb") as f:
@@ -247,11 +226,7 @@ async def upload_to_youtube_api_v2(body: YoutubeUploadRequest, token_payload: di
             media_body=MediaFileUpload(tmp_video, mimetype="video/mp4", resumable=True),
         )
         response = request.execute()
-        youtube_id = response.get("id")
-        if youtube_id:
-            await mark_youtube_uploaded(video_key=task_id, youtube_video_id=youtube_id)
-
-        return {"status": "UPLOADED", "youtube_video_id": youtube_id}
+        return {"status": "UPLOADED", "youtube_video_id": response.get("id")}
     except Exception as e:
         raise HTTPException(500, f"YouTube upload failed: {e}")
     finally:
