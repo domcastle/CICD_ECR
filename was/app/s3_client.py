@@ -79,12 +79,13 @@ def get_thumbnail_stream(user_id: str, task_id: str):
         raise
 
 # ==============================
-# 3. 리스트 로직 (기존 방식 유지)
+# 3. 리스트 로직 (최소 수정)
 # ==============================
 def list_user_videos(user_id: str):
     """
     해당 유저의 모든 mp4 파일명을 반환합니다.
-    중복 제거 없이 S3에 있는 모든 버전(원본, v1, v2)을 각각 리스트에 담습니다.
+    ✅ 최소 수정: S3에 있는 원본/버전(v1,v2)을 task_id 기준으로 묶어서 1개만 반환합니다.
+    예: ["task123", "task123_v1", "task123_v2"] → ["task123"]
     """
     prefix = f"{user_id}/"
     try:
@@ -92,18 +93,26 @@ def list_user_videos(user_id: str):
         if 'Contents' not in response:
             return []
         
-        results = []
+        tasks = set()
+
         for obj in response['Contents']:
             key = obj['Key']
             filename = key.split("/")[-1]
-            
-            # mp4 파일만 찾아서 확장자를 떼고 리스트에 추가
+
             if filename.endswith(".mp4"):
-                # 결과 예시: ["task123", "task123_v1", "task123_v2"]
-                results.append(filename.replace(".mp4", ""))
-                
-        # 최신순 정렬 (파일명 기준 내림차순)
-        return sorted(results, reverse=True)
+                base = filename.replace(".mp4", "")
+
+                # task123_v1 / task123_v2 형태면 base task_id만 추출
+                if base.endswith("_v1") or base.endswith("_v2"):
+                    task_id = base.rsplit("_", 1)[0]
+                else:
+                    task_id = base
+
+                tasks.add(task_id)
+
+        # 최신순 정렬 (기존처럼 문자열 기준 내림차순)
+        return sorted(tasks, reverse=True)
+
     except ClientError as e:
         print(f"❌ S3 목록 조회 에러: {e}")
         return []
