@@ -66,8 +66,6 @@
   color: #fff;
   opacity: 0.95;
   text-align: center;
-
-  /* 👇 반응형 폰트 크기 */
   font-size: clamp(18px, 1.8vw, 24px);
   letter-spacing: 0.04em;
 }
@@ -145,6 +143,16 @@
 @media(max-width:900px){
   .video-modal-content{ flex-direction:column; align-items:center; }
 }
+
+/* 라이브러리 목록 카드 내부 라벨 스타일 */
+.video-label {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  margin-top: 8px;
+  background: rgba(0,0,0,0.3);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
 </style>
 </head>
 
@@ -159,49 +167,47 @@
 </div>
 
 <div class="library-container">
-
-  <!-- 라이브러리 타이틀 이미지 -->
   <div class="library-header">
-    <img
-      src="/images/library.png"
-      alt="라이브러리"
-      class="library-image"
-    />
+    <img src="/images/library.png" alt="라이브러리" class="library-image" />
   </div>
-
   <div class="video-grid" id="videoGrid"></div>
 </div>
 
 <script>
 const videoGrid = document.getElementById("videoGrid");
+const menuBtn = document.getElementById("menuBtn");
+const menuDropdown = document.getElementById("menuDropdown");
+const logoutBtn = document.getElementById("logoutBtn");
+const goMainBtn = document.getElementById("goMainBtn");
 
-/* 메뉴 */
+/* 메뉴 로직 */
 menuBtn.onclick = () => menuDropdown.classList.toggle("show");
 logoutBtn.onclick = () => { localStorage.removeItem("access_token"); location.href="index.html"; };
 goMainBtn.onclick = () => location.href="main.html";
-document.addEventListener("click",e=>{
-  if(!menuBtn.contains(e.target)&&!menuDropdown.contains(e.target))
+document.addEventListener("click", e => {
+  if(!menuBtn.contains(e.target) && !menuDropdown.contains(e.target))
     menuDropdown.classList.remove("show");
 });
 
-/* 썸네일 */
+/* 썸네일 로드 (백엔드 경로 /thumbnail/${taskId} 사용) */
 async function loadThumb(img, taskId){
   try{
-    const res = await fetch(`/api/video/thumb/${taskId}.jpg`, {
+    const res = await fetch(`/api/video/thumbnail/${taskId}`, {
       headers:{Authorization:`Bearer ${token}`}
     });
+    if(!res.ok) throw new Error();
     img.src = URL.createObjectURL(await res.blob());
   }catch{
     img.src = "";
   }
 }
 
-/* 라이브러리 로드 */
+/* 라이브러리 로드 (모든 파일 개별 노출) */
 async function loadLibrary(){
   const res = await fetch("/api/video/list",{ headers:{Authorization:`Bearer ${token}`}});
   const data = await res.json();
 
-  if(!data.videos.length){
+  if(!data.videos || !data.videos.length){
     videoGrid.innerHTML = `
       <div class="empty-library">
         <div class="empty-main">생성된 영상이 없습니다.</div>
@@ -212,32 +218,42 @@ async function loadLibrary(){
     return;
   }
 
-  data.videos.forEach(v=>{
-    const card=document.createElement("div");
-    card.className="video-card";
+  data.videos.forEach(fullId => {
+    const card = document.createElement("div");
+    card.className = "video-card";
 
-    const img=document.createElement("img");
-    loadThumb(img,v.task_id);
+    // ✅ 파일명에서 베이스 ID 추출 (썸네일 매칭용)
+    const baseId = fullId.split('_v')[0].replace('_processed', '');
+    
+    const img = document.createElement("img");
+    loadThumb(img, baseId);
+
+    // ✅ 카드 하단에 버전 표시 (선택 사항)
+    const label = document.createElement("div");
+    label.className = "video-label";
+    label.innerText = fullId.includes('_v') ? fullId.split('_').pop().toUpperCase() : "ORIGINAL";
 
     card.appendChild(img);
-    card.onclick=()=>openPreview(v.task_id);
+    card.appendChild(label);
+    
+    // 클릭 시 해당 영상의 베이스 ID를 기반으로 3분할 미리보기 열기
+    card.onclick = () => openPreview(baseId); 
     videoGrid.appendChild(card);
   });
 }
 
-/* 영상 fetch */
-async function fetchVideo(taskId,type){
-  const res = await fetch(`/api/video/stream/${taskId}?type=${type}`,{
+/* 영상 fetch (variant 파라미터 사용) */
+async function fetchVideo(taskId, variant){
+  const url = variant ? `/api/video/stream/${taskId}?variant=${variant}` : `/api/video/stream/${taskId}`;
+  const res = await fetch(url, {
     headers:{Authorization:`Bearer ${token}`}
   });
   if(!res.ok) throw new Error();
   return URL.createObjectURL(await res.blob());
 }
 
-/* ===========================
-   제목 입력 모달 + 업로드
-=========================== */
-function openTitleModal(taskId, type){
+/* 유튜브 업로드 모달 */
+function openTitleModal(taskId, variant){
   const modal = document.createElement("div");
   modal.className = "title-modal";
   modal.innerHTML = `
@@ -256,110 +272,93 @@ function openTitleModal(taskId, type){
 
   modal.querySelector("#confirmBtn").onclick = async () => {
     const title = modal.querySelector("#youtubeTitle").value.trim();
-    if(!title){
-      alert("제목을 입력해주세요.");
-      return;
-    }
+    if(!title) { alert("제목을 입력해주세요."); return; }
 
     try{
-      const res = await fetch("/api/video/upload/youtube",{
+      const res = await fetch("/api/video/youtube/upload", {
         method:"POST",
         headers:{
           "Content-Type":"application/json",
           "Authorization":`Bearer ${token}`
         },
         body: JSON.stringify({
-          task_id: taskId,
-          type: type,
+          video_key: taskId,
+          variant: variant || "v1", // 업로드 시도할 버전
           title: title
         })
       });
       if(!res.ok) throw new Error();
-      alert("YouTube 업로드 완료! 채널에서 확인해주세요!");
+      alert("YouTube 업로드 완료!");
       modal.remove();
     }catch{
-      alert("YouTube 채널이 없거나, 업로드에 실패 하였습니다.");
+      alert("업로드에 실패하였습니다.");
     }
   };
 }
 
 /* 쇼츠 카드 생성 */
-async function createShort(title,taskId,type){
-  const wrap=document.createElement("div");
-  wrap.className="short-card";
+async function createShort(title, taskId, variant){
+  const wrap = document.createElement("div");
+  wrap.className = "short-card";
+  wrap.innerHTML = `
+    <div class="short-title">${title}</div>
+    <div class="short-video"><video controls></video></div>
+    <button class="youtube-btn">
+      <img class="youtube-icon" src="https://upload.wikimedia.org/wikipedia/commons/f/fd/YouTube_full-color_icon_%282024%29.svg">
+      <span class="youtube-text">업로드</span>
+    </button>
+  `;
 
-  const label=document.createElement("div");
-  label.className="short-title";
-  label.textContent=title;
-
-  const box=document.createElement("div");
-  box.className="short-video";
-
-  const video=document.createElement("video");
-  video.controls=true;
-
-  try{
-    video.src=await fetchVideo(taskId,type);
-  }catch{
-    label.textContent += " (없음)";
+  const video = wrap.querySelector("video");
+  try {
+    video.src = await fetchVideo(taskId, variant);
+  } catch {
+    wrap.querySelector(".short-title").textContent += " (없음)";
   }
 
-  box.appendChild(video);
-
-  const btn=document.createElement("button");
-  btn.className="youtube-btn";
-  btn.innerHTML=`
-    <img class="youtube-icon"
-      src="https://upload.wikimedia.org/wikipedia/commons/f/fd/YouTube_full-color_icon_%282024%29.svg">
-    <span class="youtube-text">업로드</span>
-  `;
-  btn.onclick = () => openTitleModal(taskId, type);
-
-  wrap.append(label, box, btn);
+  wrap.querySelector(".youtube-btn").onclick = () => openTitleModal(taskId, variant);
   wrap._videoEl = video;
-  wrap._type = type;
+  wrap._variant = variant;
   return wrap;
 }
 
-/* 🔥 미리보기 (v2 포함) */
+/* 🔥 미리보기 (기존 3분할 비교 구조 유지) */
 async function openPreview(taskId){
-  const modal=document.createElement("div");
-  modal.className="video-modal";
+  const modal = document.createElement("div");
+  modal.className = "video-modal";
 
-  const imgBg=document.createElement("img");
-  imgBg.className="image-bg";
+  const imgBg = document.createElement("img");
+  imgBg.className = "image-bg";
   loadThumb(imgBg, taskId);
 
-  const videoBg=document.createElement("video");
-  videoBg.className="video-bg";
-  videoBg.muted=true;
-  videoBg.loop=true;
-  videoBg.playsInline=true;
+  const videoBg = document.createElement("video");
+  videoBg.className = "video-bg";
+  videoBg.muted = true; videoBg.loop = true; videoBg.playsInline = true;
 
-  const center=document.createElement("div");
-  center.className="video-modal-center";
+  const center = document.createElement("div");
+  center.className = "video-modal-center";
+  const content = document.createElement("div");
+  content.className = "video-modal-content";
 
-  const content=document.createElement("div");
-  content.className="video-modal-content";
+  // 기존 방식대로 3가지 버전을 나란히 생성
+  const originalCard  = await createShort("Original", taskId, "");
+  const processedCard = await createShort("Edited v1", taskId, "v1");
+  const processedV2   = await createShort("Edited v2", taskId, "v2");
 
-  const originalCard  = await createShort("Original", taskId, "original");
-  const processedCard = await createShort("Edited v1", taskId, "processed");
-  const processedV2   = await createShort("Edited v2", taskId, "processed_v2");
-
-  [originalCard, processedCard, processedV2].forEach(card=>{
+  [originalCard, processedCard, processedV2].forEach(card => {
     const v = card._videoEl;
-    const type = card._type;
+    const vr = card._variant;
 
-    v.addEventListener("play", async ()=>{
-      videoBg.src = await fetchVideo(taskId,type);
+    v.addEventListener("play", async () => {
+      videoBg.src = await fetchVideo(taskId, vr);
       videoBg.currentTime = v.currentTime;
-      imgBg.style.display="none";
-      videoBg.style.display="block";
+      imgBg.style.display = "none";
+      videoBg.style.display = "block";
       videoBg.play();
     });
 
-    v.addEventListener("pause",()=>videoBg.pause());
-    v.addEventListener("seeking",()=>videoBg.currentTime=v.currentTime);
+    v.addEventListener("pause", () => videoBg.pause());
+    v.addEventListener("seeking", () => videoBg.currentTime = v.currentTime);
   });
 
   content.append(originalCard, processedCard, processedV2);
@@ -367,12 +366,11 @@ async function openPreview(taskId){
   modal.append(imgBg, videoBg, center);
   document.body.appendChild(modal);
 
-  modal.onclick=()=>modal.remove();
-  content.onclick=e=>e.stopPropagation();
+  modal.onclick = () => modal.remove();
+  content.onclick = e => e.stopPropagation();
 }
 
 loadLibrary();
 </script>
 </body>
 </html>
-

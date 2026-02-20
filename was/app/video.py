@@ -142,7 +142,7 @@ async def video_callback(request: Request):
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # ✅ 수정: 원본 업로드 시 파라미터 제외 (기본값 variant=None 사용)
+        # ✅ 원본 업로드 (variant=None 사용)
         upload_video(user_id, task_id, tmp_video)
         upload_thumbnail(user_id, task_id, tmp_thumb)
 
@@ -153,6 +153,7 @@ async def video_callback(request: Request):
             description=prompt
         )
 
+        # ✅ Worker에게 작업 전달 (v1, v2 생성을 위해)
         job_payload = {
             "input_key": f"{user_id}/{task_id}.mp4",
             "output_key": f"{user_id}/{task_id}_processed.mp4",
@@ -194,17 +195,18 @@ async def video_callback(request: Request):
 @router.get("/list")
 def get_my_videos(token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
+    # ✅ s3_client의 list_user_videos 호출 (중복 제거 없는 개별 노출 방식)
     videos = list_user_videos(user_id)
     return {"videos": videos}
 
 # ==============================
 # 4. 스트리밍 및 썸네일
 # ==============================
-# ✅ 수정: processed 대신 variant 쿼리 받음 (예: /stream/abcd?variant=v1)
 @router.get("/stream/{task_id}")
 def stream_video(task_id: str, variant: Optional[str] = Query(None), token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
     try:
+        # ✅ variant 파라미터 전달 (v1, v2 등)
         file_stream = get_video_stream(user_id, task_id, variant=variant)
         return StreamingResponse(file_stream, media_type="video/mp4")
     except Exception:
@@ -228,10 +230,11 @@ async def upload_to_youtube_api(body: YoutubeUploadRequest, token_payload: dict 
     task_id = body.video_key
     tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
     try:
-        # ✅ 수정: body.variant (v1, v2 등)를 우선 시도하고, 없으면 원본으로 폴백
+        # ✅ 사용자가 요청한 variant를 우선적으로 가져오기 시도
         try:
             stream = get_video_stream(user_id, task_id, variant=body.variant)
         except Exception:
+            # 실패 시 원본 시도
             stream = get_video_stream(user_id, task_id, variant=None)
 
         with open(tmp_video, "wb") as f:
