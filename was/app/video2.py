@@ -51,9 +51,10 @@ class YoutubeUploadRequest(BaseModel):
     video_key: str
     title: str
     description: Optional[str] = None
+    variant: str = "v1" # ✅ 다중 버전 대응을 위해 추가 (기본값 v1)
 
 # ==============================
-# 1. 비디오 생성 요청
+# 1. 비디오 생성 요청 (Grok 모델)
 # ==============================
 @router.post("/generate")
 async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(verify_jwt)):
@@ -90,7 +91,7 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
     return {"task_id": task_id, "status": "QUEUED"}
 
 # ==============================
-# ✅ 1.5. Status API (추가)
+# 1.5. Status API
 # ==============================
 @router.get("/status/{task_id}")
 def get_status_v2(task_id: str, token_payload: dict = Depends(verify_jwt)):
@@ -143,7 +144,8 @@ async def video2_callback(request: Request):
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        upload_video(user_id, task_id, tmp_video, processed=False)
+        # ✅ 수정: 원본 업로드 시 처리 여부(processed) 제외하고 variant=None 사용
+        upload_video(user_id, task_id, tmp_video)
         upload_thumbnail(user_id, task_id, tmp_thumb)
 
         try:
@@ -156,10 +158,10 @@ async def video2_callback(request: Request):
         except Exception as db_e:
             print(f"DB Error (V2): {db_e}")
 
+        # ✅ 수정: worker.py가 알아서 v1, v2 둘 다 생성하므로 variant 속성 제거
         job_payload = {
             "input_key": f"{user_id}/{task_id}.mp4",
             "output_key": f"{user_id}/{task_id}_processed.mp4",
-            "variant": "v2"
         }
         redis_client.lpush(REDIS_QUEUE, json.dumps(job_payload))
 
@@ -201,11 +203,12 @@ def get_my_videos_v2(token_payload: dict = Depends(verify_jwt)):
     videos = list_user_videos(user_id)
     return {"videos": videos}
 
+# ✅ 수정: processed 대신 variant 쿼리 파라미터로 처리
 @router.get("/stream/{task_id}")
-def stream_video_v2(task_id: str, processed: bool = Query(False), token_payload: dict = Depends(verify_jwt)):
+def stream_video_v2(task_id: str, variant: Optional[str] = Query(None), token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
     try:
-        file_stream = get_video_stream(user_id, task_id, processed)
+        file_stream = get_video_stream(user_id, task_id, variant=variant)
         return StreamingResponse(file_stream, media_type="video/mp4")
     except Exception:
         raise HTTPException(404, "Video not found")
@@ -229,10 +232,11 @@ async def upload_to_youtube_v2(body: YoutubeUploadRequest, token_payload: dict =
     tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
 
     try:
+        # ✅ 수정: body.variant 로 시도하고 없으면 원본으로 폴백
         try:
-            stream = get_video_stream(user_id, task_id, processed=True)
+            stream = get_video_stream(user_id, task_id, variant=body.variant)
         except Exception:
-            stream = get_video_stream(user_id, task_id, processed=False)
+            stream = get_video_stream(user_id, task_id, variant=None)
 
         with open(tmp_video, "wb") as f:
             f.write(stream.read())
@@ -254,7 +258,6 @@ async def upload_to_youtube_v2(body: YoutubeUploadRequest, token_payload: dict =
         youtube_id = response.get("id")
 
         if youtube_id:
-            # ✅ v1과 동일한 시그니처로 통일
             await mark_youtube_uploaded(video_key=task_id, youtube_video_id=youtube_id)
 
         return {"status": "UPLOADED", "youtube_video_id": youtube_id}

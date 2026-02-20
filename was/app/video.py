@@ -47,6 +47,7 @@ class YoutubeUploadRequest(BaseModel):
     video_key: str
     title: str
     description: Optional[str] = None
+    variant: str = "v1" # ✅ 추가: 유튜브에 올릴 영상 버전 (기본값 v1)
 
 # ==============================
 # 1. 비디오 생성 요청 (KIE API 호출)
@@ -81,7 +82,6 @@ async def generate_video(req: GenerateRequest, token_payload: dict = Depends(ver
     if not task_id:
         raise HTTPException(502, "KIE did not return taskId")
 
-    # 콜백/상태 조회용 Redis 저장
     redis_client.set(f"task_user:{task_id}", user_id, ex=86400)
     redis_client.set(f"task_prompt:{task_id}", req.prompt, ex=86400)
     redis_client.set(f"task_status:{task_id}", "QUEUED", ex=86400)
@@ -89,7 +89,7 @@ async def generate_video(req: GenerateRequest, token_payload: dict = Depends(ver
     return {"task_id": task_id, "status": "QUEUED"}
 
 # ==============================
-# ✅ 1.5. 프론트 polling용 상태 조회 (추가)
+# 1.5. 프론트 polling용 상태 조회
 # ==============================
 @router.get("/status/{task_id}")
 def get_status(task_id: str, token_payload: dict = Depends(verify_jwt)):
@@ -99,7 +99,6 @@ def get_status(task_id: str, token_payload: dict = Depends(verify_jwt)):
     if not owner:
         return {"task_id": task_id, "status": "NOT_FOUND"}
     if owner != user_id:
-        # 다른 유저가 만든 task_id 조회 방지
         raise HTTPException(403, "Forbidden")
 
     status = redis_client.get(f"task_status:{task_id}") or "UNKNOWN"
@@ -119,7 +118,6 @@ async def video_callback(request: Request):
     if not task_id or not video_url:
         return {"code": 200, "msg": "waiting"}
 
-    # 상태 업데이트
     redis_client.set(f"task_status:{task_id}", "PROCESSING", ex=86400)
 
     user_id = redis_client.get(f"task_user:{task_id}")
@@ -133,24 +131,21 @@ async def video_callback(request: Request):
     tmp_thumb = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
 
     try:
-        # 영상 다운로드
         async with httpx.AsyncClient(timeout=300) as client:
             v_resp = await client.get(video_url)
             v_resp.raise_for_status()
             with open(tmp_video, "wb") as f:
                 f.write(v_resp.content)
 
-        # 썸네일 생성
         subprocess.run(
             ["ffmpeg", "-y", "-i", tmp_video, "-ss", "00:00:01", "-vframes", "1", tmp_thumb],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # S3 업로드
-        upload_video(user_id, task_id, tmp_video, processed=False)
+        # ✅ 수정: 원본 업로드 시 파라미터 제외 (기본값 variant=None 사용)
+        upload_video(user_id, task_id, tmp_video)
         upload_thumbnail(user_id, task_id, tmp_thumb)
 
-        # DB 기록
         await insert_final_video(
             video_key=task_id,
             user_id=user_id,
@@ -158,11 +153,9 @@ async def video_callback(request: Request):
             description=prompt
         )
 
-        # ✅ worker payload의 input_key 버그 수정 ("/.mp4" → ".mp4")
         job_payload = {
             "input_key": f"{user_id}/{task_id}.mp4",
             "output_key": f"{user_id}/{task_id}_processed.mp4",
-            "variant": "v1"
         }
         redis_client.lpush(REDIS_QUEUE, json.dumps(job_payload))
 
@@ -207,11 +200,12 @@ def get_my_videos(token_payload: dict = Depends(verify_jwt)):
 # ==============================
 # 4. 스트리밍 및 썸네일
 # ==============================
+# ✅ 수정: processed 대신 variant 쿼리 받음 (예: /stream/abcd?variant=v1)
 @router.get("/stream/{task_id}")
-def stream_video(task_id: str, processed: bool = Query(False), token_payload: dict = Depends(verify_jwt)):
+def stream_video(task_id: str, variant: Optional[str] = Query(None), token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
     try:
-        file_stream = get_video_stream(user_id, task_id, processed)
+        file_stream = get_video_stream(user_id, task_id, variant=variant)
         return StreamingResponse(file_stream, media_type="video/mp4")
     except Exception:
         raise HTTPException(404, "Video not found")
@@ -234,10 +228,11 @@ async def upload_to_youtube_api(body: YoutubeUploadRequest, token_payload: dict 
     task_id = body.video_key
     tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
     try:
+        # ✅ 수정: body.variant (v1, v2 등)를 우선 시도하고, 없으면 원본으로 폴백
         try:
-            stream = get_video_stream(user_id, task_id, processed=True)
+            stream = get_video_stream(user_id, task_id, variant=body.variant)
         except Exception:
-            stream = get_video_stream(user_id, task_id, processed=False)
+            stream = get_video_stream(user_id, task_id, variant=None)
 
         with open(tmp_video, "wb") as f:
             f.write(stream.read())

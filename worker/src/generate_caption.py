@@ -4,10 +4,11 @@ import base64
 import requests
 import tempfile
 import os
+import json
 from pathlib import Path
 
 MODEL = "qwen2.5vl"
-# 환경변수에서 호스트 주소를 받아옴 (Hybrid 모드 핵심) 1
+# 환경변수에서 호스트 주소를 받아옴 (Hybrid 모드 핵심)
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_URL = f"{OLLAMA_HOST}/api/chat"
 
@@ -29,16 +30,14 @@ PROMPTS = {
     ),
 }
 
-VARIANT = os.getenv("CAPTION_VARIANT", "v1")
-PROMPT = PROMPTS.get(VARIANT, PROMPTS["v1"])
-
-def ollama_chat(image_b64: str, timeout=120) -> str:
+# 1. 특정 프롬프트를 매개변수로 받도록 수정됨
+def ollama_chat(image_b64: str, prompt_text: str, timeout=120) -> str:
     payload = {
         "model": MODEL,
         "messages": [
             {
                 "role": "user",
-                "content": PROMPT,
+                "content": prompt_text,
                 "images": [image_b64],
             }
         ],
@@ -53,21 +52,26 @@ def ollama_chat(image_b64: str, timeout=120) -> str:
         sys.stderr.write(f"Ollama Request Error: {e}\n")
         return ""
 
+# 2. 불필요한 특수문자 제거 로직
 def sanitize(text: str) -> str:
     for c in ["\n", "\r", "'", '"', "(", ")", "[", "]", "#", "*", ":", "."]:
         text = text.replace(c, "")
     return text.strip()
 
 def main():
+    # 예외 발생 시 반환할 기본 JSON 구조
+    default_json = json.dumps({"v1": DEFAULT_TEXT, "v2": DEFAULT_TEXT}, ensure_ascii=False)
+
     if len(sys.argv) != 2:
-        print(DEFAULT_TEXT)
+        print(default_json)
         return
 
     video = Path(sys.argv[1])
     if not video.exists():
-        print(DEFAULT_TEXT)
+        print(default_json)
         return
 
+    # 3. 썸네일 프레임 추출
     fd, frame_path = tempfile.mkstemp(suffix=".jpg")
     os.close(fd)
     frame = Path(frame_path)
@@ -89,13 +93,23 @@ def main():
         )
 
         img_b64 = base64.b64encode(frame.read_bytes()).decode()
-        caption = sanitize(ollama_chat(img_b64))
-        print(caption if caption else DEFAULT_TEXT)
+        
+        # 4. v1, v2 프롬프트를 각각 순회하며 자막 생성
+        captions = {}
+        for variant, prompt in PROMPTS.items():
+            result = sanitize(ollama_chat(img_b64, prompt))
+            # 결과가 비어있으면 기본 텍스트 삽입
+            captions[variant] = result if result else DEFAULT_TEXT
 
-    except Exception:
-        print(DEFAULT_TEXT)
+        # 5. JSON 형식으로 콘솔에 출력 (worker.py가 이 문자열을 읽음)
+        print(json.dumps(captions, ensure_ascii=False))
+
+    except Exception as e:
+        sys.stderr.write(f"Error occurred: {e}\n")
+        print(default_json)
 
     finally:
+        # 임시 프레임 이미지 삭제
         frame.unlink(missing_ok=True)
 
 if __name__ == "__main__":

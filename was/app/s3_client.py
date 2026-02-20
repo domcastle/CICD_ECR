@@ -7,7 +7,6 @@ AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET", "videos")
 
 # S3 클라이언트 초기화
-# ROSA의 IRSA(IAM Role)를 쓰거나, 환경변수(ACCESS_KEY)가 있으면 자동 인식됨
 s3_client = boto3.client('s3', region_name=AWS_REGION)
 
 def ensure_bucket():
@@ -17,9 +16,11 @@ def ensure_bucket():
 # ======================
 # 업로드 로직
 # ======================
-def upload_video(user_id: str, task_id: str, file_path: str, processed: bool = False):
+# ✅ 수정: processed(bool) 대신 variant(str)를 받아 다양한 버전 대응
+def upload_video(user_id: str, task_id: str, file_path: str, variant: str = None):
     """로컬 파일을 S3로 업로드"""
-    filename = f"{task_id}_processed.mp4" if processed else f"{task_id}.mp4"
+    # variant가 있으면 task_id_v1.mp4 / 없으면 task_id.mp4 (원본)
+    filename = f"{task_id}_{variant}.mp4" if variant else f"{task_id}.mp4"
     key = f"{user_id}/{filename}"
     
     print(f"⬆️ Uploading to S3: {key}")
@@ -53,9 +54,10 @@ def upload_thumbnail(user_id: str, task_id: str, thumb_path: str):
 # ======================
 # 스트리밍/다운로드 로직
 # ======================
-def get_video_stream(user_id: str, task_id: str, processed: bool = False):
+# ✅ 수정: 처리 여부가 아닌 variant 식별자로 요청 스트림 반환
+def get_video_stream(user_id: str, task_id: str, variant: str = None):
     """S3 객체 Body 반환 (FastAPI StreamingResponse용)"""
-    filename = f"{task_id}_processed.mp4" if processed else f"{task_id}.mp4"
+    filename = f"{task_id}_{variant}.mp4" if variant else f"{task_id}.mp4"
     key = f"{user_id}/{filename}"
     
     try:
@@ -71,7 +73,6 @@ def get_thumbnail_stream(user_id: str, task_id: str):
         obj = s3_client.get_object(Bucket=AWS_S3_BUCKET, Key=key)
         return obj['Body']
     except ClientError as e:
-        # 썸네일이 없을 때 처리를 위해 에러 전파
         raise
 
 # ======================
@@ -87,12 +88,11 @@ def list_user_videos(user_id: str):
         
         results = []
         for obj in response['Contents']:
-            # key 예시: user123/taskABC.mp4
             key = obj['Key']
             filename = key.split("/")[-1]
             
             if filename.endswith(".mp4"):
-                # 확장자 제거한 이름 반환 (기존 로직 유지)
+                # .mp4를 제거하면 원본(taskABC), v1(taskABC_v1) 형태로 목록에 출력됨
                 results.append(filename.replace(".mp4", ""))
                 
         return sorted(results, reverse=True)

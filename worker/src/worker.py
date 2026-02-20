@@ -15,7 +15,6 @@ REDIS_QUEUE = os.getenv("REDIS_QUEUE", "video_processing_jobs")
 
 # AWS S3 설정
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
-# [수정] 버킷 이름 고정 (환경변수 없으면 이 값 사용)
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET", "team1videostorage-justic")
 
 # 스크립트 경로
@@ -33,11 +32,10 @@ redis_client = redis.Redis(
 # --- AWS 클라이언트 연결 ---
 print(f"☁️  Initializing AWS Clients (Region: {AWS_REGION})...")
 s3_client = boto3.client('s3', region_name=AWS_REGION)
-# [추가] EC2 IP를 찾기 위한 클라이언트 추가
 ec2_client = boto3.client('ec2', region_name=AWS_REGION)
 
 # ---------------------------------------------------------
-# [추가] EC2 자동 탐색 함수
+# EC2 자동 탐색 함수
 # ---------------------------------------------------------
 def get_ollama_server_ip():
     target_name = "ai-worker-cpu"
@@ -60,12 +58,10 @@ def get_ollama_server_ip():
         print(f"❌ AWS API Error: {e}")
         return None
 
-# [추가] 시작할 때 IP 찾아서 저장 (못 찾으면 로컬호스트)
 CURRENT_OLLAMA_HOST = get_ollama_server_ip()
 if not CURRENT_OLLAMA_HOST:
     print("⚠️  Ollama server not found. Using localhost.")
     CURRENT_OLLAMA_HOST = "http://localhost:11434"
-
 
 def download_object(key, dst):
     """S3에서 파일을 다운로드합니다."""
@@ -92,68 +88,83 @@ def upload_object(key, src):
 
 def process_job(job: dict):
     input_key = job["input_key"]
-    output_key = job["output_key"]
-    variant = job.get("variant", "v1")
+    # _processed.mp4를 잘라내어 베이스 키 생성 (예: user_id/task_id)
+    base_output_key = job["output_key"].replace("_processed.mp4", "")
 
     # 임시 파일 생성
     tmp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    tmp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
 
     try:
         # 1. S3 다운로드
         download_object(input_key, tmp_input)
 
-        # 2. 캡션 생성 (subprocess)
-        print(f"🧠 Generating caption via Ollama ({CURRENT_OLLAMA_HOST})...")
+        # 2. 캡션 생성 (subprocess) - JSON 문자열로 반환됨
+        print(f"🧠 Generating captions (v1 & v2) via Ollama ({CURRENT_OLLAMA_HOST})...")
         
-        # [수정] 환경변수에 찾은 IP 주입
         env = os.environ.copy()
-        env["CAPTION_VARIANT"] = variant
-        env["OLLAMA_HOST"] = CURRENT_OLLAMA_HOST  # <--- 여기서 IP 전달
+        env["OLLAMA_HOST"] = CURRENT_OLLAMA_HOST
         
-        caption = ""
+        caption_output = "{}"
         try:
-            caption = subprocess.check_output(
+            caption_output = subprocess.check_output(
                 ["python3", CAPTION_SCRIPT, tmp_input],
                 text=True,
                 timeout=600,
-                env=env, # [수정] 조작된 환경변수 전달
+                env=env,
             ).strip()
         except subprocess.CalledProcessError as e:
             print(f"⚠️ Caption generation failed: {e}")
         except subprocess.TimeoutExpired:
             print("⚠️ Caption generation timed out.")
         
-        if not caption:
-            caption = "편집된 영상입니다"
+        # 3. JSON 파싱
+        try:
+            captions = json.loads(caption_output)
+        except json.JSONDecodeError:
+            print(f"⚠️ JSON Parse Error. Raw output: {caption_output}")
+            captions = {"v1": "편집된 영상입니다", "v2": "편집된 영상입니다"}
 
-        print(f"📝 Caption: {caption}")
+        print(f"📝 Extracted Captions: {captions}")
 
-        # 3. FFmpeg 실행 (subprocess)
-        print("🎬 Processing video with FFmpeg...")
-        subprocess.run(
-            [
-                FFMPEG_SCRIPT,
-                tmp_input,
-                tmp_output,
-                "", # TTS Wav (없음)
-                "", # Subtitle (없음)
-                caption,
-            ],
-            check=True,
-        )
+        # 4. v1, v2 각각 영상 렌더링 및 업로드
+        for variant, text in captions.items():
+            print(f"🎬 Processing [{variant}] video with FFmpeg... Text: '{text}'")
+            tmp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            
+            # 각각의 S3 저장 경로 생성 (예: user_id/task_id_v1.mp4)
+            variant_output_key = f"{base_output_key}_{variant}.mp4"
 
-        # 4. S3 업로드
-        upload_object(output_key, tmp_output)
-        print("✅ Job completed successfully.")
+            try:
+                # FFmpeg 실행
+                subprocess.run(
+                    [
+                        FFMPEG_SCRIPT,
+                        tmp_input,
+                        tmp_output,
+                        "", # TTS Wav (없음)
+                        "", # Subtitle (없음)
+                        text, # 생성된 텍스트 자막
+                    ],
+                    check=True,
+                )
+
+                # S3 업로드
+                upload_object(variant_output_key, tmp_output)
+                print(f"✅ {variant} 업로드 완료: {variant_output_key}")
+                
+            except Exception as e:
+                print(f"❌ Error processing {variant}: {e}")
+            finally:
+                if os.path.exists(tmp_output):
+                    os.remove(tmp_output)
+
+        print("🎉 모든 버전(v1, v2) 작업이 완료되었습니다.")
 
     except Exception as e:
         print(f"❌ Error processing job: {e}")
     finally:
-        # 임시 파일 정리
-        for f in (tmp_input, tmp_output):
-            if os.path.exists(f):
-                os.remove(f)
+        if os.path.exists(tmp_input):
+            os.remove(tmp_input)
 
 def main():
     print(f"🚀 AI Worker started (Target Ollama: {CURRENT_OLLAMA_HOST})")
