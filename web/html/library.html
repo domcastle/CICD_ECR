@@ -153,6 +153,9 @@
   padding: 2px 8px;
   border-radius: 4px;
 }
+
+/* ✅ 추가: 미리보기 카드에서 "편집 중" 로딩 오버레이용 스피너 */
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 
@@ -296,13 +299,19 @@ function openTitleModal(taskId, variant){
   };
 }
 
-/* 쇼츠 카드 생성 */
+/* ✅ 수정: 쇼츠 카드 생성
+   - (없음) 대신 로딩 오버레이 표시
+   - v1/v2는 주기적으로 다시 시도해서 생성되면 자동으로 영상 표시
+   - 생성 중에는 업로드 버튼 비활성화
+*/
 async function createShort(title, taskId, variant){
   const wrap = document.createElement("div");
   wrap.className = "short-card";
   wrap.innerHTML = `
     <div class="short-title">${title}</div>
-    <div class="short-video"><video controls></video></div>
+    <div class="short-video" style="position:relative;">
+      <video controls></video>
+    </div>
     <button class="youtube-btn">
       <img class="youtube-icon" src="https://upload.wikimedia.org/wikipedia/commons/f/fd/YouTube_full-color_icon_%282024%29.svg">
       <span class="youtube-text">업로드</span>
@@ -310,13 +319,95 @@ async function createShort(title, taskId, variant){
   `;
 
   const video = wrap.querySelector("video");
-  try {
-    video.src = await fetchVideo(taskId, variant);
-  } catch {
-    wrap.querySelector(".short-title").textContent += " (없음)";
+  const box = wrap.querySelector(".short-video");
+  const btn = wrap.querySelector(".youtube-btn");
+
+  // 로딩 오버레이
+  const overlay = document.createElement("div");
+  overlay.style.position = "absolute";
+  overlay.style.inset = "0";
+  overlay.style.display = "none";
+  overlay.style.alignItems = "center";
+  overlay.style.justifyContent = "center";
+  overlay.style.flexDirection = "column";
+  overlay.style.gap = "10px";
+  overlay.style.background = "rgba(0,0,0,0.55)";
+  overlay.style.color = "#fff";
+  overlay.style.textAlign = "center";
+  overlay.style.padding = "16px";
+  overlay.style.backdropFilter = "blur(3px)";
+  overlay.style.zIndex = "2";
+
+  const spinner = document.createElement("div");
+  spinner.style.width = "34px";
+  spinner.style.height = "34px";
+  spinner.style.border = "3px solid rgba(255,255,255,0.35)";
+  spinner.style.borderTopColor = "#fff";
+  spinner.style.borderRadius = "50%";
+  spinner.style.animation = "spin 1s linear infinite";
+
+  const overlayMain = document.createElement("div");
+  overlayMain.textContent = "영상이 편집되고 있습니다";
+  overlayMain.style.fontWeight = "700";
+  overlayMain.style.fontSize = "14px";
+
+  const overlaySub = document.createElement("div");
+  overlaySub.textContent = "잠시만 기다려주세요. 완료되면 자동으로 표시됩니다.";
+  overlaySub.style.fontSize = "12px";
+  overlaySub.style.opacity = "0.9";
+  overlaySub.style.lineHeight = "1.4";
+
+  overlay.append(spinner, overlayMain, overlaySub);
+  box.appendChild(overlay);
+
+  function setLoading(isLoading){
+    if (isLoading) {
+      overlay.style.display = "flex";
+      btn.style.opacity = "0.45";
+      btn.style.pointerEvents = "none";
+      btn.title = "영상 생성 중에는 업로드할 수 없습니다.";
+    } else {
+      overlay.style.display = "none";
+      btn.style.opacity = "1";
+      btn.style.pointerEvents = "auto";
+      btn.title = "";
+    }
   }
 
-  wrap.querySelector(".youtube-btn").onclick = () => openTitleModal(taskId, variant);
+  async function tryLoadVideo(){
+    try {
+      video.src = await fetchVideo(taskId, variant);
+      setLoading(false);
+      return true;
+    } catch {
+      setLoading(true);
+      return false;
+    }
+  }
+
+  // 최초 시도
+  const ok = await tryLoadVideo();
+
+  // v1/v2는 생성 지연이 있을 수 있으니 자동 재시도
+  // - original("")은 보통 바로 있어 재시도 불필요
+  let retryTimer = null;
+  const shouldRetry = (variant === "v1" || variant === "v2");
+  if (!ok && shouldRetry) {
+    retryTimer = setInterval(async () => {
+      if (!document.body.contains(wrap)) {
+        clearInterval(retryTimer);
+        return;
+      }
+      if (video.src) {
+        clearInterval(retryTimer);
+        return;
+      }
+      const success = await tryLoadVideo();
+      if (success) clearInterval(retryTimer);
+    }, 8000);
+  }
+
+  btn.onclick = () => openTitleModal(taskId, variant);
   wrap._videoEl = video;
   wrap._variant = variant;
   return wrap;
