@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # =========================
-# 시스템 패키지 + CA 설치 1
+# 시스템 패키지 + CA 설치
 # =========================
 RUN apt-get update && apt-get install -y \
     ffmpeg \
