@@ -31,7 +31,6 @@ router = APIRouter(tags=["video2"])
 # ==============================
 # 환경 설정
 # ==============================
-# ✅ Grok 전용 API URL
 KIE_API_URL = "https://api.kie.ai/api/v1/jobs/createTask"
 KIE_API_KEY = os.getenv("KIE_API_KEY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://auth.justic.store")
@@ -49,10 +48,10 @@ class YoutubeUploadRequest(BaseModel):
     video_key: str
     title: str
     description: Optional[str] = None
-    variant: str = "v1" # 유튜브에 올릴 영상 버전 (기본값 v1)
+    variant: str = "v1"
 
 # ==============================
-# 1. 비디오 생성 요청 (Grok API 호출)
+# 1. 비디오 생성 요청
 # ==============================
 @router.post("/generate")
 async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(verify_jwt)):
@@ -60,10 +59,9 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
     if not KIE_API_KEY:
         raise HTTPException(500, "KIE_API_KEY missing")
 
-    # ✅ Grok 모델 규격에 맞춘 payload
     payload = {
         "model": "grok-imagine/text-to-video",
-        "callBackUrl": f"{APP_BASE_URL}/api/video2/callback", # 콜백 경로 주의 (video2)
+        "callBackUrl": f"{APP_BASE_URL}/api/video2/callback",
         "input": {
             "prompt": req.prompt,
             "aspect_ratio": "9:16",
@@ -74,7 +72,7 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
                 KIE_API_URL,
                 headers={"Authorization": f"Bearer {KIE_API_KEY}"},
@@ -86,7 +84,6 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
         print(f"KIE V2 API Error: {e}")
         raise HTTPException(502, f"KIE V2 Generation failed: {e}")
 
-    # ✅ Grok 응답 구조에 맞게 taskId 추출
     task_id = data.get("data", {}).get("taskId")
     if not task_id:
         raise HTTPException(502, "KIE V2 did not return taskId")
@@ -103,11 +100,8 @@ async def generate_video_v2(req: GenerateRequest, token_payload: dict = Depends(
 @router.get("/status/{task_id}")
 def get_status_v2(task_id: str, token_payload: dict = Depends(verify_jwt)):
     user_id = token_payload["sub"]
-
     owner = redis_client.get(f"task_user:{task_id}")
-    if not owner:
-        return {"task_id": task_id, "status": "NOT_FOUND"}
-    if owner != user_id:
+    if not owner or owner != user_id:
         raise HTTPException(403, "Forbidden")
 
     status = redis_client.get(f"task_status:{task_id}") or "UNKNOWN"
@@ -119,20 +113,32 @@ def get_status_v2(task_id: str, token_payload: dict = Depends(verify_jwt)):
 @router.post("/callback")
 async def video2_callback(request: Request):
     payload = await request.json()
-
-    # 🚀 디버깅: Grok 콜백이 어떻게 오는지 로그 출력
     print(f"🔥 [video2_callback] Received Payload: {json.dumps(payload)}")
 
     data = payload.get("data", {})
     task_id = data.get("taskId")
     
-    # ✅ video.py와 동일하게 video_url 추출. 단, Grok 특성 대비 fallback(videoUrl) 추가
-    video_url = data.get("info", {}).get("resultUrls", [None])[0]
+    # 🎯 핵심 수정: Grok의 변태적인(?) 문자열 JSON 구조 파싱
+    video_url = None
+    result_json_str = data.get("resultJson")
+    
+    if result_json_str:
+        try:
+            # 문자열을 다시 JSON 딕셔너리로 변환
+            parsed_result = json.loads(result_json_str)
+            video_url = parsed_result.get("resultUrls", [None])[0]
+        except json.JSONDecodeError:
+            print("❌ resultJson 파싱 실패")
+            pass
+            
+    # 만약 파싱 실패하거나 다른 구조로 올 경우를 대비한 폴백
+    if not video_url:
+        video_url = data.get("info", {}).get("resultUrls", [None])[0]
     if not video_url:
         video_url = data.get("videoUrl")
 
     if not task_id or not video_url:
-        print(f"❌ [video2_callback] Missing task_id or video_url. payload: {payload}")
+        print(f"❌ [video2_callback] URL 추출 실패. payload: {payload}")
         return {"code": 200, "msg": "waiting"}
 
     redis_client.set(f"task_status:{task_id}", "PROCESSING", ex=86400)
@@ -159,7 +165,7 @@ async def video2_callback(request: Request):
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # ✅ 원본 업로드 (variant=None 사용)
+        # 원본 업로드
         upload_video(user_id, task_id, tmp_video)
         upload_thumbnail(user_id, task_id, tmp_thumb)
 
@@ -170,7 +176,7 @@ async def video2_callback(request: Request):
             description=prompt
         )
 
-        # ✅ Worker에게 작업 전달 (video.py와 완벽히 동일한 구조)
+        # ✅ 드디어 AI Worker로 데이터가 넘어갑니다!
         job_payload = {
             "input_key": f"{user_id}/{task_id}.mp4",
             "output_key": f"{user_id}/{task_id}_processed.mp4",
@@ -180,7 +186,7 @@ async def video2_callback(request: Request):
 
         await insert_operation_log(
             user_id=user_id,
-            log_type="VIDEO_GENERATE_V2", # DB 로그 구분
+            log_type="VIDEO_GENERATE_V2",
             status="SUCCESS",
             video_key=task_id,
             message="Callback processed successfully"
@@ -193,11 +199,7 @@ async def video2_callback(request: Request):
         redis_client.set(f"task_status:{task_id}", "FAILED", ex=86400)
         try:
             await insert_operation_log(
-                user_id=user_id,
-                log_type="VIDEO_GENERATE_V2",
-                status="FAILED",
-                video_key=task_id,
-                message=str(e)
+                user_id=user_id, log_type="VIDEO_GENERATE_V2", status="FAILED", video_key=task_id, message=str(e)
             )
         except Exception:
             pass
