@@ -116,7 +116,7 @@
     // ===============================
     const params = new URLSearchParams(window.location.search);
     const taskId = params.get("task_id");
-    const model = params.get("model") || "video";
+    const model = params.get("model") || "video"; // video(veo) / video2(grok)
 
     if (!taskId) {
       window.location.href = "loading_error.html";
@@ -171,12 +171,29 @@
           },
         });
 
+        // 인증 만료/실패
+        if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("access_token");
+          clearInterval(intervalId);
+          clearInterval(progressTimer);
+          window.location.replace("index.html");
+          return;
+        }
+
         if (!res.ok) throw new Error();
 
         const data = await res.json();
 
+        // ✅ 완료/실패 상태값 호환 (video=veo, video2=grok 모두 대응)
+        // - 어떤 API는 status, 어떤 API는 state(success)로 내려줄 수 있음
+        const rawStatus = (data.status ?? data.state ?? "");
+        const st = String(rawStatus).toUpperCase();
+
+        const DONE_SET = new Set(["DONE", "COMPLETED", "SUCCESS", "SUCCEEDED", "FINISHED"]);
+        const FAIL_SET = new Set(["FAILED", "FAIL", "ERROR"]);
+
         // ✅ 완료
-        if (data.status === "DONE") {
+        if (DONE_SET.has(st)) {
           clearInterval(intervalId);
           clearInterval(progressTimer);
 
@@ -184,13 +201,16 @@
           text.textContent = "100%";
 
           setTimeout(() => {
-            window.location.replace("loading_success.html");
+            // ✅ success 페이지에서 방금 생성한 작업을 알 수 있게 파라미터 전달
+            window.location.replace(
+              `loading_success.html?task_id=${encodeURIComponent(taskId)}&model=${encodeURIComponent(model)}`
+            );
           }, 3000);
           return;
         }
 
         // ❌ 실패
-        if (data.status === "FAILED") {
+        if (FAIL_SET.has(st)) {
           clearInterval(intervalId);
           clearInterval(progressTimer);
           window.location.replace("loading_error.html");
