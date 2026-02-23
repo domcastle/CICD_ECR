@@ -7,7 +7,8 @@ on:
       # 🔥 web 폴더 수정 시에만 이 워크플로우가 실행됨
       - 'web/**'
       - '.github/workflows/web-deploy.yaml'
-
+  repository_dispatch:
+    types: [trigger-web-deploy]
 permissions:
   contents: write
 

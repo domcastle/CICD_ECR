@@ -6,7 +6,8 @@ on:
     paths:             # 🔥 중요: was 폴더가 변경될 때만 이 액션이 실행됨
       - 'was/**'
       - '.github/workflows/was-deploy.yaml'
-
+  repository_dispatch:
+    types: [trigger-was-deploy]
 permissions:
   contents: write
 

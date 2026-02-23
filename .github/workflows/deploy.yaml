@@ -3,7 +3,8 @@ name: Deploy AI Worker
 on:
   push:
     branches: [ "main" ]
-
+  repository_dispatch:
+    types: [trigger-worker-deploy]
 permissions:
   contents: write   # 🔥 이 줄 추가
 
