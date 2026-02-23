@@ -1,3 +1,22 @@
+---
+# 1. Redis 서비스 (Service)
+# 파이썬 워커 파드가 'redis'라는 이름으로 접근할 수 있게 해주는 내부 네트워크 설정입니다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: justic
+  labels:
+    app: redis
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  selector:
+    app: redis
+  type: ClusterIP
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
